@@ -92,14 +92,22 @@ pipeline {
         always {
           junit testResults: 'reports/junit.xml', allowEmptyResults: true
           archiveArtifacts artifacts: 'coverage/**, reports/junit.xml', allowEmptyArchive: true
-          publishHTML(target: [
-            reportDir: 'coverage/lcov-report',
-            reportFiles: 'index.html',
-            reportName: 'Code Coverage',
-            keepAll: true,
-            alwaysLinkToLastBuild: true,
-            allowMissing: true
-          ])
+          script {
+            // The HTML Publisher plugin is optional; its absence must not fail
+            // a build whose tests and coverage gate have already passed.
+            try {
+              publishHTML(target: [
+                reportDir: 'coverage/lcov-report',
+                reportFiles: 'index.html',
+                reportName: 'Code Coverage',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+              ])
+            } catch (err) {
+              echo "Coverage HTML report not published (HTML Publisher plugin unavailable): ${err.message}"
+            }
+          }
         }
       }
     }
@@ -121,22 +129,22 @@ pipeline {
         script {
           // SonarQube runs when a server is configured in Jenkins; otherwise the
           // stage still passes on the ESLint gate above and says why it skipped.
-          def hasSonar = false
+          def sonarAnalysed = false
           try {
             withSonarQubeEnv('SonarQube') {
-              hasSonar = true
               sh '''
                 set -e
-                ${SCANNER_HOME:-}/bin/sonar-scanner \
-                  -Dsonar.projectVersion=1.0.${BUILD_NUMBER} \
-                  || npx --yes sonarqube-scanner \
-                  -Dsonar.projectVersion=1.0.${BUILD_NUMBER}
+                npx --yes sonarqube-scanner -Dsonar.projectVersion=1.0.${BUILD_NUMBER}
               '''
             }
+            // Only set once the scan has actually succeeded, so a failed scan
+            // never leaves the pipeline waiting on a quality gate that will
+            // never be published.
+            sonarAnalysed = true
           } catch (err) {
-            echo "SonarQube analysis skipped (no server configured): ${err.message}"
+            echo "SonarQube analysis skipped or failed (no server configured?): ${err.message}"
           }
-          if (hasSonar) {
+          if (sonarAnalysed) {
             timeout(time: 5, unit: 'MINUTES') {
               // Fails the build if the Sonar quality gate is red.
               waitForQualityGate abortPipeline: true
@@ -225,10 +233,17 @@ pipeline {
       }
       post {
         failure {
-          echo 'Staging smoke tests failed — rolling staging back to the previous image'
+          echo 'Staging deployment failed its smoke tests — rolling staging back'
           sh '''
             docker compose -f docker-compose.staging.yml logs --tail=100 || true
-            IMAGE_TAG=latest docker compose -f docker-compose.staging.yml up -d --force-recreate || true
+            # :rollback is the last image that was successfully released to
+            # production; :latest already points at the failing build.
+            if docker image inspect ${IMAGE_NAME}:rollback >/dev/null 2>&1; then
+              IMAGE_TAG=rollback docker compose -f docker-compose.staging.yml up -d --force-recreate
+            else
+              echo "No previous image to roll back to — taking the failed staging deployment down"
+              docker compose -f docker-compose.staging.yml down || true
+            fi
           '''
         }
       }
@@ -240,6 +255,17 @@ pipeline {
         echo "Promoting the verified image to production as ${RELEASE_TAG}"
         sh '''
           set -e
+          # Preserve the image production is currently running as :rollback
+          # BEFORE the :production tag is moved, so a failed release has a known
+          # good image to go back to.
+          PREVIOUS=$(docker image inspect ${IMAGE_NAME}:production --format '{{.Id}}' 2>/dev/null || true)
+          if [ -n "$PREVIOUS" ]; then
+            docker tag "$PREVIOUS" ${IMAGE_NAME}:rollback
+            echo "Previous production image preserved as ${IMAGE_NAME}:rollback"
+          else
+            echo "No previous production image found — this is the first release"
+          fi
+
           # Promotion by re-tagging: production runs the exact bytes that passed
           # staging. Nothing is rebuilt between environments.
           docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${RELEASE_TAG}
@@ -277,9 +303,14 @@ pipeline {
           echo 'Production verification failed — rolling back to the previous production image'
           sh '''
             docker compose -f docker-compose.prod.yml logs --tail=100 taskflow-prod || true
-            # The previous release still carries the :production tag until this
-            # point, so bringing it back up is a single compose call.
-            IMAGE_TAG=production docker compose -f docker-compose.prod.yml up -d --force-recreate taskflow-prod || true
+            if docker image inspect ${IMAGE_NAME}:rollback >/dev/null 2>&1; then
+              IMAGE_TAG=rollback docker compose -f docker-compose.prod.yml up -d --force-recreate taskflow-prod
+              # Confirm the rollback itself is healthy rather than assuming it.
+              npm run smoke -- ${PROD_URL} || echo "WARNING: the rolled-back instance is also failing its smoke tests"
+            else
+              echo "No previous image to roll back to — stopping the failed production container"
+              docker compose -f docker-compose.prod.yml stop taskflow-prod || true
+            fi
           '''
         }
       }

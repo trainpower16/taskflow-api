@@ -59,13 +59,8 @@ async function waitForReady() {
   return false;
 }
 
-async function main() {
-  console.log(`Running smoke tests against ${baseUrl}\n`);
-
-  if (!(await waitForReady())) {
-    process.exit(1);
-  }
-
+/** Checks the endpoints the platform itself depends on: health and metrics. */
+async function checkPlatform() {
   const health = await http('/health');
   record(
     'GET /health returns the running build',
@@ -78,7 +73,10 @@ async function main() {
     'GET /metrics exposes Prometheus metrics',
     metrics.status === 200 && String(metrics.body).includes('http_requests_total')
   );
+}
 
+/** Walks a real user journey: register, log in, create a project and a task. */
+async function checkUserJourney() {
   // A unique email keeps the smoke test idempotent across repeated runs.
   const email = `smoke-${Date.now()}@example.com`;
   const password = 'smoke-test-password';
@@ -124,6 +122,17 @@ async function main() {
 
   // Clean up so repeated runs do not accumulate data in the environment.
   await http(`/api/projects/${projectId}`, { method: 'DELETE', headers: authHeaders });
+}
+
+async function main() {
+  console.log(`Running smoke tests against ${baseUrl}\n`);
+
+  if (!(await waitForReady())) {
+    process.exit(1);
+  }
+
+  await checkPlatform();
+  await checkUserJourney();
 
   const failed = results.filter((result) => !result.passed);
   console.log(`\n${results.length - failed.length}/${results.length} smoke tests passed`);

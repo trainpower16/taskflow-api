@@ -101,13 +101,38 @@ describe('errorHandler', () => {
 });
 
 describe('metrics route labels', () => {
-  it('collapses identifiers so the label cardinality stays bounded', () => {
-    const label = routeLabel({
-      baseUrl: '/api/projects/0f2b1c4e-6a7d-4f8b-9c1d-2e3f4a5b6c7d/tasks',
-      route: { path: '/:taskId' },
-    });
+  const ok = { statusCode: 200 };
 
-    expect(label).toBe('/api/projects/:id/tasks/:taskId');
+  it('collapses identifiers so the label cardinality stays bounded', () => {
+    const label = routeLabel(
+      {
+        originalUrl: '/api/projects/0f2b1c4e-6a7d-4f8b-9c1d-2e3f4a5b6c7d/tasks/1f2b1c4e-6a7d-4f8b-9c1d-2e3f4a5b6c7d',
+        route: { path: '/:taskId' },
+      },
+      ok
+    );
+
+    expect(label).toBe('/api/projects/:id/tasks/:id');
+  });
+
+  it('strips the query string and any trailing slash', () => {
+    expect(routeLabel({ originalUrl: '/api/projects/?status=done', route: {} }, ok)).toBe(
+      '/api/projects'
+    );
+  });
+
+  it('keeps the full path for a failed request, even though Express resets baseUrl', () => {
+    // Regression guard: a 401 on login must still be labelled with its full
+    // path, otherwise the failed-login alert rule can never match it.
+    expect(routeLabel({ originalUrl: '/api/auth/login', route: { path: '/login' } }, { statusCode: 401 })).toBe(
+      '/api/auth/login'
+    );
+  });
+
+  it('buckets unmatched routes so scanners cannot inflate the time series', () => {
+    expect(routeLabel({ originalUrl: '/wp-admin/setup.php' }, { statusCode: 404 })).toBe(
+      '/unmatched'
+    );
   });
 });
 

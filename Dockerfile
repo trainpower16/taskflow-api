@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # ---------- Stage 1: install production dependencies ----------
 # Kept separate so the runtime image never contains the build toolchain or the
 # dev dependencies (jest, eslint), which shrinks both the image and the attack

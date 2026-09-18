@@ -2,6 +2,7 @@ node_modules
 coverage
 reports
 data
+dist
 tests
 .git
 .gitignore

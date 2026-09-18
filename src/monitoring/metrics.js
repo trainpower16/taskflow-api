@@ -63,13 +63,22 @@ const UUID_SEGMENT = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const NUMERIC_SEGMENT = /\/\d+/g;
 
 /**
- * Normalises a request path into a low-cardinality route label. Identifiers are
- * collapsed to ':id' because a label per project id would make the Prometheus
- * time series grow without bound.
+ * Normalises a request path into a low-cardinality route label.
+ *
+ * The label is derived from req.originalUrl rather than req.baseUrl: when a
+ * handler calls next(err), Express restores baseUrl as it unwinds to the
+ * error middleware, so by the time the response finishes baseUrl is empty and
+ * a failed POST /api/auth/login would otherwise be recorded as '/login'.
+ *
+ * Identifiers are collapsed to ':id', and requests that matched no route are
+ * bucketed, so that neither real ids nor a scanner probing random paths can
+ * make the number of Prometheus time series grow without bound.
  */
-function routeLabel(req) {
-  const raw = req.route ? `${req.baseUrl}${req.route.path}` : req.path;
-  const normalised = raw.replace(UUID_SEGMENT, '/:id').replace(NUMERIC_SEGMENT, '/:id');
+function routeLabel(req, res) {
+  if (res && res.statusCode === 404 && !req.route) return '/unmatched';
+
+  const path = String(req.originalUrl || req.url || '/').split('?')[0];
+  const normalised = path.replace(UUID_SEGMENT, '/:id').replace(NUMERIC_SEGMENT, '/:id');
   return normalised.length > 1 ? normalised.replace(/\/$/, '') : normalised;
 }
 
@@ -79,7 +88,7 @@ function metricsMiddleware(req, res, next) {
   res.on('finish', () => {
     const labels = {
       method: req.method,
-      route: routeLabel(req),
+      route: routeLabel(req, res),
       status_code: String(res.statusCode),
     };
     httpRequestsTotal.inc(labels);

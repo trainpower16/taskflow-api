@@ -46,6 +46,19 @@ describe('TaskFlow API (integration)', () => {
       expect(res.text).toContain('taskflow_build_info');
       expect(res.text).toContain('taskflow_tasks_total');
     });
+
+    it('labels a failed login with its full route so the alert rule can match it', async () => {
+      await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'ghost@example.com', password: 'wrong-password' })
+        .expect(401);
+
+      const res = await request(app).get('/metrics').expect(200);
+
+      expect(res.text).toMatch(
+        /http_requests_total\{method="POST",route="\/api\/auth\/login",status_code="401"/
+      );
+    });
   });
 
   describe('authentication', () => {

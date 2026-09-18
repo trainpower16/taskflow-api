@@ -14,11 +14,10 @@ if (configErrors.length > 0) {
 database.connect();
 
 const app = createApp();
+// The service, version, build and env fields are already attached to every log
+// line by the logger's base bindings, so only the new information is added here.
 const server = app.listen(config.port, config.host, () => {
-  logger.info(
-    { port: config.port, env: config.env, version: config.version, build: config.buildNumber },
-    'taskflow-api started'
-  );
+  logger.info({ port: config.port, commit: config.gitCommit }, 'taskflow-api started');
 });
 
 /**
