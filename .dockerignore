@@ -1,0 +1,14 @@
+node_modules
+coverage
+reports
+data
+tests
+.git
+.gitignore
+*.md
+docs
+monitoring
+Jenkinsfile
+docker-compose*.yml
+eslint.config.js
+sonar-project.properties

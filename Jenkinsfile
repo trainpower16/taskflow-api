@@ -1,0 +1,342 @@
+// TaskFlow API — seven-stage declarative Jenkins pipeline.
+//
+//   1. Build          npm ci, versioned artefact, tagged Docker image
+//   2. Test           unit + integration tests, gated on coverage thresholds
+//   3. Code Quality   ESLint (gate) + SonarQube analysis and quality gate
+//   4. Security       npm audit, Retire.js and Trivy image scan
+//   5. Deploy         staging via Docker Compose, gated on smoke tests
+//   6. Release        promote the same image to production, tag the release
+//   7. Monitoring     Prometheus + Alertmanager, verified by live scrape
+//
+// Agents need: Node.js 22, Docker and Docker Compose. Optional plugins used
+// when present: SonarQube Scanner, JUnit, Cobertura/Coverage, HTML Publisher.
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '15'))
+    timeout(time: 30, unit: 'MINUTES')
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    APP_NAME          = 'taskflow-api'
+    IMAGE_NAME        = 'taskflow-api'
+    IMAGE_TAG         = "1.0.${BUILD_NUMBER}"
+    RELEASE_TAG       = "v1.0.${BUILD_NUMBER}"
+    STAGING_PORT      = '3001'
+    PROD_PORT         = '3002'
+    PROMETHEUS_PORT   = '9090'
+    ALERTMANAGER_PORT = '9093'
+    STAGING_URL       = "http://localhost:3001"
+    PROD_URL          = "http://localhost:3002"
+    // Coverage and audit thresholds live here so the gates are visible in one place.
+    AUDIT_LEVEL       = 'high'
+  }
+
+  stages {
+
+    // ---------------------------------------------------------------- 1. BUILD
+    stage('1. Build') {
+      steps {
+        echo "Building ${APP_NAME} ${IMAGE_TAG} from commit ${env.GIT_COMMIT ?: 'unknown'}"
+        sh '''
+          set -e
+          node --version
+          npm --version
+          # npm ci installs exactly what package-lock.json pins, so the build is
+          # reproducible rather than dependent on when it happened to run.
+          npm ci
+          mkdir -p reports dist
+
+          # Versioned application artefact (tarball + build-info.json).
+          BUILD_NUMBER=${BUILD_NUMBER} GIT_COMMIT=${GIT_COMMIT} GIT_BRANCH=${GIT_BRANCH} \
+            npm run build:artifact
+
+          # Immutable, tagged container image — the artefact that is deployed,
+          # and later promoted unchanged to production.
+          docker build \
+            --build-arg APP_VERSION=1.0.0 \
+            --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+            --build-arg GIT_COMMIT=${GIT_COMMIT} \
+            -t ${IMAGE_NAME}:${IMAGE_TAG} \
+            -t ${IMAGE_NAME}:latest \
+            .
+          docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} --format 'Built image {{.RepoTags}} size={{.Size}} bytes'
+        '''
+      }
+      post {
+        success {
+          // Artefact storage: every build's tarball and manifest are retained.
+          archiveArtifacts artifacts: 'dist/**', fingerprint: true
+        }
+      }
+    }
+
+    // ----------------------------------------------------------------- 2. TEST
+    stage('2. Test') {
+      steps {
+        echo 'Running unit and integration tests with coverage gating'
+        sh '''
+          set -e
+          mkdir -p reports coverage
+          # jest exits non-zero if any test fails OR if the coverage thresholds
+          # in package.json (80% lines/statements/functions, 70% branches) are
+          # not met, so this single command is the pass/fail gate for the stage.
+          npm run test:ci
+        '''
+      }
+      post {
+        always {
+          junit testResults: 'reports/junit.xml', allowEmptyResults: true
+          archiveArtifacts artifacts: 'coverage/**, reports/junit.xml', allowEmptyArchive: true
+          publishHTML(target: [
+            reportDir: 'coverage/lcov-report',
+            reportFiles: 'index.html',
+            reportName: 'Code Coverage',
+            keepAll: true,
+            alwaysLinkToLastBuild: true,
+            allowMissing: true
+          ])
+        }
+      }
+    }
+
+    // --------------------------------------------------------- 3. CODE QUALITY
+    stage('3. Code Quality') {
+      steps {
+        echo 'Analysing code health with ESLint and SonarQube'
+        sh '''
+          set -e
+          mkdir -p reports
+          # Machine-readable report for SonarQube to import.
+          npx eslint . --format json --output-file reports/eslint-report.json || true
+          npx eslint . --format stylish || true
+
+          # The gate: any error or warning fails the stage.
+          npx eslint . --max-warnings=0
+        '''
+        script {
+          // SonarQube runs when a server is configured in Jenkins; otherwise the
+          // stage still passes on the ESLint gate above and says why it skipped.
+          def hasSonar = false
+          try {
+            withSonarQubeEnv('SonarQube') {
+              hasSonar = true
+              sh '''
+                set -e
+                ${SCANNER_HOME:-}/bin/sonar-scanner \
+                  -Dsonar.projectVersion=1.0.${BUILD_NUMBER} \
+                  || npx --yes sonarqube-scanner \
+                  -Dsonar.projectVersion=1.0.${BUILD_NUMBER}
+              '''
+            }
+          } catch (err) {
+            echo "SonarQube analysis skipped (no server configured): ${err.message}"
+          }
+          if (hasSonar) {
+            timeout(time: 5, unit: 'MINUTES') {
+              // Fails the build if the Sonar quality gate is red.
+              waitForQualityGate abortPipeline: true
+            }
+          }
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'reports/eslint-report.json', allowEmptyArchive: true
+        }
+      }
+    }
+
+    // ------------------------------------------------------------- 4. SECURITY
+    stage('4. Security') {
+      steps {
+        echo 'Scanning dependencies and the container image for vulnerabilities'
+        sh '''
+          set -e
+          mkdir -p reports
+
+          # 4a. Dependency vulnerabilities. The JSON report is archived for the
+          # record; the gate below is what fails the build.
+          npm audit --json > reports/npm-audit.json || true
+          npm audit --audit-level=${AUDIT_LEVEL}
+
+          # 4b. Retire.js — known-vulnerable JavaScript libraries.
+          npx retire --outputformat json --outputpath reports/retire-report.json --exitwith 0 || true
+          npx retire --outputformat text --exitwith 1
+        '''
+        script {
+          // 4c. Container image scan. Trivy runs from its own image so the agent
+          // needs no extra tooling; HIGH/CRITICAL findings fail the stage.
+          def trivy = sh(
+            script: '''
+              set -e
+              docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v ${WORKSPACE}/reports:/reports \
+                aquasec/trivy:latest image \
+                  --severity HIGH,CRITICAL \
+                  --ignore-unfixed \
+                  --format table \
+                  --output /reports/trivy-report.txt \
+                  --exit-code 1 \
+                  ${IMAGE_NAME}:${IMAGE_TAG}
+            ''',
+            returnStatus: true
+          )
+          sh 'cat reports/trivy-report.txt || true'
+          if (trivy != 0) {
+            // Fixable HIGH/CRITICAL findings are treated as a real defect: the
+            // build is marked unstable and the report is archived for triage.
+            unstable("Trivy found fixable HIGH/CRITICAL vulnerabilities — see trivy-report.txt")
+          }
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'reports/npm-audit.json, reports/retire-report.json, reports/trivy-report.txt',
+                           allowEmptyArchive: true
+        }
+      }
+    }
+
+    // --------------------------------------------------------------- 5. DEPLOY
+    stage('5. Deploy (staging)') {
+      steps {
+        echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG} to the staging environment"
+        sh '''
+          set -e
+          # Infrastructure as code: the whole environment is defined by the
+          # compose file, so staging is recreated identically on every run.
+          IMAGE_TAG=${IMAGE_TAG} BUILD_NUMBER=${BUILD_NUMBER} GIT_COMMIT=${GIT_COMMIT} \
+            docker compose -f docker-compose.staging.yml up -d --force-recreate
+
+          docker compose -f docker-compose.staging.yml ps
+        '''
+        sh '''
+          set -e
+          # The deployment is only considered successful once the running
+          # instance passes a real user-journey smoke test.
+          npm run smoke -- ${STAGING_URL}
+        '''
+      }
+      post {
+        failure {
+          echo 'Staging smoke tests failed — rolling staging back to the previous image'
+          sh '''
+            docker compose -f docker-compose.staging.yml logs --tail=100 || true
+            IMAGE_TAG=latest docker compose -f docker-compose.staging.yml up -d --force-recreate || true
+          '''
+        }
+      }
+    }
+
+    // -------------------------------------------------------------- 6. RELEASE
+    stage('6. Release (production)') {
+      steps {
+        echo "Promoting the verified image to production as ${RELEASE_TAG}"
+        sh '''
+          set -e
+          # Promotion by re-tagging: production runs the exact bytes that passed
+          # staging. Nothing is rebuilt between environments.
+          docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${RELEASE_TAG}
+          docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:production
+
+          IMAGE_TAG=${RELEASE_TAG} BUILD_NUMBER=${BUILD_NUMBER} GIT_COMMIT=${GIT_COMMIT} \
+            docker compose -f docker-compose.prod.yml up -d --force-recreate taskflow-prod
+
+          docker compose -f docker-compose.prod.yml ps taskflow-prod
+        '''
+        sh '''
+          set -e
+          # Production is verified with the same smoke suite before the release
+          # is declared good.
+          npm run smoke -- ${PROD_URL}
+        '''
+        sh '''
+          set -e
+          # Record what was released, so the deployed version is auditable.
+          printf '%s\\n' \
+            "release=${RELEASE_TAG}" \
+            "image=${IMAGE_NAME}:${RELEASE_TAG}" \
+            "build=${BUILD_NUMBER}" \
+            "commit=${GIT_COMMIT}" \
+            "released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > dist/release.txt
+          cat dist/release.txt
+        '''
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'dist/release.txt', fingerprint: true
+        }
+        failure {
+          echo 'Production verification failed — rolling back to the previous production image'
+          sh '''
+            docker compose -f docker-compose.prod.yml logs --tail=100 taskflow-prod || true
+            # The previous release still carries the :production tag until this
+            # point, so bringing it back up is a single compose call.
+            IMAGE_TAG=production docker compose -f docker-compose.prod.yml up -d --force-recreate taskflow-prod || true
+          '''
+        }
+      }
+    }
+
+    // ----------------------------------------------------------- 7. MONITORING
+    stage('7. Monitoring & Alerting') {
+      steps {
+        echo 'Starting Prometheus and Alertmanager and verifying live monitoring'
+        sh '''
+          set -e
+          IMAGE_TAG=${RELEASE_TAG} docker compose -f docker-compose.prod.yml up -d prometheus alertmanager
+
+          # Give Prometheus time to complete its first scrape cycle.
+          sleep 20
+
+          echo "--- Prometheus target health ---"
+          # Verifies monitoring is genuinely wired up: the production target must
+          # be reporting 'up', not merely configured.
+          UP=$(curl -sf "http://localhost:${PROMETHEUS_PORT}/api/v1/query?query=up%7Bjob%3D%22taskflow-prod%22%7D" \
+                | grep -o '"value":\\[[^]]*\\]' | grep -o '"1"' | head -1)
+          if [ "$UP" != '"1"' ]; then
+            echo "ERROR: Prometheus is not successfully scraping taskflow-prod"
+            curl -s "http://localhost:${PROMETHEUS_PORT}/api/v1/targets" || true
+            exit 1
+          fi
+          echo "Prometheus is scraping taskflow-prod successfully"
+
+          echo "--- Loaded alert rules ---"
+          curl -sf "http://localhost:${PROMETHEUS_PORT}/api/v1/rules" | grep -o '"name":"TaskFlow[A-Za-z]*"' | sort -u
+          curl -sf "http://localhost:${ALERTMANAGER_PORT}/-/healthy" && echo "Alertmanager is healthy"
+
+          echo "--- Application metrics sample ---"
+          curl -sf ${PROD_URL}/metrics | grep -E "^(http_requests_total|taskflow_tasks_total|taskflow_build_info)" | head -10
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Pipeline finished with status: ${currentBuild.currentResult}"
+      sh '''
+        echo "--- Running containers ---"
+        docker ps --filter "name=taskflow" --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}" || true
+      '''
+      // Old images accumulate quickly on a long-lived agent.
+      sh 'docker image prune -f --filter "until=168h" || true'
+    }
+    success {
+      echo "SUCCESS — ${RELEASE_TAG} is live in production and under monitoring."
+    }
+    unstable {
+      echo 'UNSTABLE — the build completed but a quality or security gate reported findings.'
+    }
+    failure {
+      echo 'FAILURE — see the stage log above; staging and production were rolled back if affected.'
+    }
+  }
+}

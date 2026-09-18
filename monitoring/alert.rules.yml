@@ -1,0 +1,54 @@
+groups:
+  - name: taskflow-availability
+    rules:
+      # Fires when Prometheus cannot scrape the application at all, which is the
+      # signal that production is down rather than merely degraded.
+      - alert: TaskFlowInstanceDown
+        expr: up{job="taskflow-prod"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'TaskFlow production instance is unreachable'
+          description: 'Prometheus has failed to scrape {{ $labels.instance }} for over 1 minute.'
+
+  - name: taskflow-errors
+    rules:
+      # More than 5% of requests failing with a 5xx over a 5-minute window.
+      - alert: TaskFlowHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="taskflow-prod",status_code=~"5.."}[5m]))
+            /
+          sum(rate(http_requests_total{job="taskflow-prod"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'TaskFlow 5xx error rate above 5%'
+          description: 'The server error rate has exceeded 5% of all requests for 2 minutes.'
+
+      # A burst of failed logins is the signature of a credential-stuffing attempt.
+      - alert: TaskFlowAuthFailureSpike
+        expr: sum(rate(http_requests_total{job="taskflow-prod",route="/api/auth/login",status_code="401"}[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Elevated rate of failed logins'
+          description: 'More than one failed login per second sustained over 5 minutes.'
+
+  - name: taskflow-latency
+    rules:
+      # 95th percentile latency above 1 second means users are feeling it.
+      - alert: TaskFlowHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="taskflow-prod"}[5m])) by (le)
+          ) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'TaskFlow p95 latency above 1s'
+          description: '95% of requests are slower than 1 second over the last 5 minutes.'
