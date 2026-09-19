@@ -39,6 +39,7 @@ async function waitForReady() {
         return true;
       }
     } catch {
+      // Container may still be starting; keep retrying until attempts run out.
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }

@@ -40,6 +40,7 @@ const tasksByStatus = new client.Gauge({
         this.set({ status }, count);
       }
     } catch {
+      // A scrape must never crash the app; a missing metric is the signal.
     }
   },
 });
