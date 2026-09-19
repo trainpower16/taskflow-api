@@ -1,8 +1,6 @@
 groups:
   - name: taskflow-availability
     rules:
-      # Fires when Prometheus cannot scrape the application at all, which is the
-      # signal that production is down rather than merely degraded.
       - alert: TaskFlowInstanceDown
         expr: up{job="taskflow-prod"} == 0
         for: 1m
@@ -14,7 +12,6 @@ groups:
 
   - name: taskflow-errors
     rules:
-      # More than 5% of requests failing with a 5xx over a 5-minute window.
       - alert: TaskFlowHighErrorRate
         expr: |
           sum(rate(http_requests_total{job="taskflow-prod",status_code=~"5.."}[5m]))
@@ -27,7 +24,6 @@ groups:
           summary: 'TaskFlow 5xx error rate above 5%'
           description: 'The server error rate has exceeded 5% of all requests for 2 minutes.'
 
-      # A burst of failed logins is the signature of a credential-stuffing attempt.
       - alert: TaskFlowAuthFailureSpike
         expr: sum(rate(http_requests_total{job="taskflow-prod",route="/api/auth/login",status_code="401"}[5m])) > 1
         for: 2m
@@ -39,7 +35,6 @@ groups:
 
   - name: taskflow-latency
     rules:
-      # 95th percentile latency above 1 second means users are feeling it.
       - alert: TaskFlowHighLatency
         expr: |
           histogram_quantile(
