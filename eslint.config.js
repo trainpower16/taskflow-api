@@ -4,10 +4,6 @@ const js = require('@eslint/js');
 const globals = require('globals');
 const jest = require('eslint-plugin-jest');
 
-/**
- * ESLint flat configuration. The Code Quality stage runs this with
- * --max-warnings=0, so any rule below is effectively a build gate.
- */
 module.exports = [
   {
     ignores: ['node_modules/**', 'coverage/**', 'reports/**', 'dist/**', 'data/**'],
@@ -42,7 +38,6 @@ module.exports = [
     rules: {
       ...jest.configs.recommended.rules,
       'max-lines-per-function': 'off',
-      // supertest's chained .expect() calls are assertions in their own right.
       'jest/expect-expect': [
         'warn',
         { assertFunctionNames: ['expect', 'request.**.expect'] },
@@ -50,7 +45,6 @@ module.exports = [
     },
   },
   {
-    // The build and operations scripts legitimately write to stdout.
     files: ['scripts/**/*.js'],
     rules: { 'no-console': 'off' },
   },
