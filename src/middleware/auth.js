@@ -4,7 +4,6 @@ const authService = require('../services/authService');
 const userRepository = require('../repositories/userRepository');
 const { UnauthorizedError, ForbiddenError } = require('../utils/errors');
 
-/** Verifies the bearer token and attaches the current user to the request. */
 function authenticate(req, _res, next) {
   try {
     const header = req.headers.authorization || '';
@@ -24,7 +23,6 @@ function authenticate(req, _res, next) {
   }
 }
 
-/** Role gate, used for the admin-only endpoints. */
 function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.user) return next(new UnauthorizedError());
