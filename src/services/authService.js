@@ -6,10 +6,6 @@ const { config } = require('../config');
 const userRepository = require('../repositories/userRepository');
 const { ConflictError, UnauthorizedError } = require('../utils/errors');
 
-/**
- * Authentication use-cases. Passwords are never stored or logged in plain text
- * and the hash is stripped from every object returned to the transport layer.
- */
 const authService = {
   async register({ email, name, password, role = 'member' }) {
     if (userRepository.findByEmail(email)) {
@@ -21,8 +17,6 @@ const authService = {
 
   async login({ email, password }) {
     const user = userRepository.findByEmail(email);
-    // The same generic error is returned for an unknown email and a wrong
-    // password so the endpoint cannot be used to enumerate valid accounts.
     if (!user) throw new UnauthorizedError('Invalid email or password');
 
     const matches = await bcrypt.compare(password, user.password_hash);
