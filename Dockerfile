@@ -30,7 +30,10 @@ LABEL org.opencontainers.image.title="taskflow-api" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.source="https://github.com/your-username/taskflow-api"
 
-RUN apk add --no-cache wget
+# Patch the base image's OS packages to the latest available versions. Most
+# fixable HIGH/CRITICAL findings the Security stage reports come from the base
+# layer rather than from application code, and this closes them at build time.
+RUN apk upgrade --no-cache
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
@@ -44,8 +47,10 @@ USER node
 EXPOSE 3000
 
 # Docker restarts an unhealthy container, which is the first line of defence
-# before the Prometheus alert rules fire.
+# before the Prometheus alert rules fire. Node's built-in fetch is used rather
+# than curl or wget so the runtime image needs no extra package installed
+# purely for the health probe.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/health || exit 1
+  CMD node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "src/server.js"]
