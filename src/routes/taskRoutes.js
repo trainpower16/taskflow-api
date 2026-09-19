@@ -5,7 +5,6 @@ const { z } = require('zod');
 const taskService = require('../services/taskService');
 const validate = require('../middleware/validate');
 
-// mergeParams gives this router access to :projectId from the parent route.
 const router = express.Router({ mergeParams: true });
 
 const createSchema = z.object({
@@ -18,7 +17,6 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.partial();
 
-/** Maps the camelCase API contract onto the snake_case database columns. */
 const toColumns = (body) => ({
   title: body.title,
   description: body.description,
