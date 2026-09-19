@@ -14,7 +14,6 @@ describe('TaskFlow API (integration)', () => {
   beforeEach(resetDb);
   afterAll(teardownDb);
 
-  /** Registers a user and returns a ready-to-use Authorization header. */
   async function signUp(email = 'user@example.com', role = 'member') {
     await request(app)
       .post('/api/auth/register')

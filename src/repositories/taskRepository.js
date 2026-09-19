@@ -19,7 +19,6 @@ const taskRepository = {
     return getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id);
   },
 
-  /** Lists the tasks of a project, optionally filtered by status. */
   listByProject(projectId, { status, limit = 50, offset = 0 } = {}) {
     if (status) {
       return getDb()
@@ -53,7 +52,6 @@ const taskRepository = {
     return getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0;
   },
 
-  /** Task counts grouped by status — exported to Prometheus as a business metric. */
   countByStatus() {
     const rows = getDb().prepare('SELECT status, COUNT(*) AS c FROM tasks GROUP BY status').all();
     const counts = { todo: 0, in_progress: 0, done: 0 };

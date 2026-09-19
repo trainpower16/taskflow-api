@@ -4,10 +4,6 @@ const taskRepository = require('../repositories/taskRepository');
 const projectService = require('./projectService');
 const { NotFoundError } = require('../utils/errors');
 
-/**
- * Task use-cases. Every call is scoped through projectService.getOwned() first,
- * so a task can only ever be reached via a project the actor is allowed to see.
- */
 const taskService = {
   create(actor, projectId, data) {
     projectService.getOwned(actor, projectId);

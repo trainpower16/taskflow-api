@@ -16,7 +16,6 @@ const projectRepository = {
     return getDb().prepare('SELECT * FROM projects WHERE id = ?').get(id);
   },
 
-  /** Admins see every project; members only see the ones they own. */
   listForUser(userId, { isAdmin = false, limit = 50, offset = 0 } = {}) {
     if (isAdmin) {
       return getDb()
