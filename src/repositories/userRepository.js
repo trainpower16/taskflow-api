@@ -3,7 +3,6 @@
 const { randomUUID } = require('node:crypto');
 const { getDb } = require('../config/database');
 
-/** Data access for users. All SQL is parameterised to prevent SQL injection. */
 const userRepository = {
   create({ email, name, passwordHash, role = 'member' }) {
     const id = randomUUID();
