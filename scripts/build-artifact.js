@@ -1,13 +1,5 @@
 'use strict';
 
-/**
- * Produces the versioned build artefact for the Build stage.
- *
- * Writes dist/build-info.json, which records exactly what was built, and a
- * tarball of the runtime files. Jenkins archives both, so every build is
- * traceable back to a commit and can be reproduced.
- */
-
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
