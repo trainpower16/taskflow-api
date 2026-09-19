@@ -1,10 +1,5 @@
 'use strict';
 
-/**
- * Application error taxonomy. Using typed errors keeps HTTP concerns out of the
- * service layer while still giving the error middleware enough information to
- * produce a correct status code and a safe client-facing message.
- */
 class AppError extends Error {
   constructor(message, statusCode = 500, code = 'INTERNAL_ERROR', details = undefined) {
     super(message);
