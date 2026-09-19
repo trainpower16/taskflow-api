@@ -8,7 +8,6 @@ const { register } = require('../monitoring/metrics');
 const router = express.Router();
 const startedAt = Date.now();
 
-/** Liveness: is the process up? Used by the Docker HEALTHCHECK. */
 router.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -21,7 +20,6 @@ router.get('/health', (_req, res) => {
   });
 });
 
-/** Readiness: can the instance actually serve traffic? Gates the deployment. */
 router.get('/ready', (_req, res) => {
   const dbReady = database.healthCheck();
   res.status(dbReady ? 200 : 503).json({
@@ -30,7 +28,6 @@ router.get('/ready', (_req, res) => {
   });
 });
 
-/** Prometheus scrape endpoint. */
 router.get('/metrics', async (_req, res, next) => {
   try {
     res.set('Content-Type', register.contentType);
