@@ -2,10 +2,6 @@
 
 const { ValidationError } = require('../utils/errors');
 
-/**
- * Validates a request section against a Zod schema and replaces it with the
- * parsed result, so handlers only ever see data of a known shape.
- */
 function validate(schema, source = 'body') {
   return (req, _res, next) => {
     const result = schema.safeParse(req[source]);
