@@ -4,18 +4,10 @@ const { AppError, NotFoundError } = require('../utils/errors');
 const logger = require('../utils/logger');
 const { config } = require('../config');
 
-/** Terminal 404 handler for any route that did not match. */
 function notFoundHandler(req, _res, next) {
   next(new NotFoundError(`Route ${req.method} ${req.originalUrl}`));
 }
 
-/**
- * Single error funnel. Operational errors are reported faithfully; anything
- * unexpected is logged in full but reported to the client as a generic 500 so
- * that stack traces and internals never leak off the server.
- */
-// The unused fourth parameter is required: Express identifies error-handling
-// middleware by its arity, so removing it would silently disable this handler.
 function errorHandler(err, req, res, _next) {
   const isOperational = err instanceof AppError && err.isOperational;
   const statusCode = isOperational ? err.statusCode : 500;
