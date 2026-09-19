@@ -1,16 +1,5 @@
 'use strict';
 
-/**
- * Post-deployment smoke test.
- *
- * Run by the Deploy stage against staging and again by the Release stage
- * against production. It exercises a real user journey end to end, so a
- * deployment that starts but cannot actually serve traffic fails the build
- * instead of silently going live.
- *
- * Usage: node scripts/smoke-test.js http://localhost:3001
- */
-
 const baseUrl = (process.argv[2] || process.env.SMOKE_URL || 'http://localhost:3000').replace(
   /\/$/,
   ''
@@ -41,7 +30,6 @@ async function http(path, options = {}) {
   return { status: response.status, body };
 }
 
-/** Waits for the deployment to report ready before asserting anything else. */
 async function waitForReady() {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -51,7 +39,6 @@ async function waitForReady() {
         return true;
       }
     } catch {
-      // The container may still be starting; retry until the attempt budget runs out.
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -59,7 +46,6 @@ async function waitForReady() {
   return false;
 }
 
-/** Checks the endpoints the platform itself depends on: health and metrics. */
 async function checkPlatform() {
   const health = await http('/health');
   record(
@@ -75,9 +61,7 @@ async function checkPlatform() {
   );
 }
 
-/** Walks a real user journey: register, log in, create a project and a task. */
 async function checkUserJourney() {
-  // A unique email keeps the smoke test idempotent across repeated runs.
   const email = `smoke-${Date.now()}@example.com`;
   const password = 'smoke-test-password';
 
@@ -120,7 +104,6 @@ async function checkUserJourney() {
   const unauthorised = await http('/api/projects');
   record('protected routes reject an anonymous request', unauthorised.status === 401);
 
-  // Clean up so repeated runs do not accumulate data in the environment.
   await http(`/api/projects/${projectId}`, { method: 'DELETE', headers: authHeaders });
 }
 
