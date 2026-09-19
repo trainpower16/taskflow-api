@@ -1,7 +1,7 @@
 # TaskFlow API
 
 A project and task management REST API, built as the subject of a seven-stage
-Jenkins DevOps pipeline for SIT223/SIT753.
+Jenkins DevOps pipeline for SIT223.
 
 **Stack:** Node.js 22, Express, SQLite (better-sqlite3), JWT authentication,
 Jest + Supertest, ESLint, SonarQube, Trivy, Docker, Prometheus and Alertmanager.
