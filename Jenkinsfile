@@ -1,16 +1,3 @@
-// TaskFlow API — seven-stage declarative Jenkins pipeline.
-//
-//   1. Build          npm ci, versioned artefact, tagged Docker image
-//   2. Test           unit + integration tests, gated on coverage thresholds
-//   3. Code Quality   ESLint (gate) + SonarQube analysis and quality gate
-//   4. Security       npm audit, Retire.js and Trivy image scan
-//   5. Deploy         staging via Docker Compose, gated on smoke tests
-//   6. Release        promote the same image to production, tag the release
-//   7. Monitoring     Prometheus + Alertmanager, verified by live scrape
-//
-// Agents need: Node.js 22, Docker and Docker Compose. Optional plugins used
-// when present: SonarQube Scanner, JUnit, Cobertura/Coverage, HTML Publisher.
-
 pipeline {
   agent any
 
@@ -32,13 +19,11 @@ pipeline {
     ALERTMANAGER_PORT = '9093'
     STAGING_URL       = "http://localhost:3001"
     PROD_URL          = "http://localhost:3002"
-    // Coverage and audit thresholds live here so the gates are visible in one place.
     AUDIT_LEVEL       = 'high'
   }
 
   stages {
 
-    // ---------------------------------------------------------------- 1. BUILD
     stage('1. Build') {
       steps {
         echo "Building ${APP_NAME} ${IMAGE_TAG} from commit ${env.GIT_COMMIT ?: 'unknown'}"
@@ -69,13 +54,11 @@ pipeline {
       }
       post {
         success {
-          // Artefact storage: every build's tarball and manifest are retained.
           archiveArtifacts artifacts: 'dist/**', fingerprint: true
         }
       }
     }
 
-    // ----------------------------------------------------------------- 2. TEST
     stage('2. Test') {
       steps {
         echo 'Running unit and integration tests with coverage gating'
@@ -93,8 +76,6 @@ pipeline {
           junit testResults: 'reports/junit.xml', allowEmptyResults: true
           archiveArtifacts artifacts: 'coverage/**, reports/junit.xml', allowEmptyArchive: true
           script {
-            // The HTML Publisher plugin is optional; its absence must not fail
-            // a build whose tests and coverage gate have already passed.
             try {
               publishHTML(target: [
                 reportDir: 'coverage/lcov-report',
@@ -112,7 +93,6 @@ pipeline {
       }
     }
 
-    // --------------------------------------------------------- 3. CODE QUALITY
     stage('3. Code Quality') {
       steps {
         echo 'Analysing code health with ESLint and SonarQube'
@@ -127,8 +107,6 @@ pipeline {
           npx eslint . --max-warnings=0
         '''
         script {
-          // SonarQube runs when a server is configured in Jenkins; otherwise the
-          // stage still passes on the ESLint gate above and says why it skipped.
           def sonarAnalysed = false
           try {
             withSonarQubeEnv('SonarQube') {
@@ -137,16 +115,12 @@ pipeline {
                 npx --yes sonarqube-scanner -Dsonar.projectVersion=1.0.${BUILD_NUMBER}
               '''
             }
-            // Only set once the scan has actually succeeded, so a failed scan
-            // never leaves the pipeline waiting on a quality gate that will
-            // never be published.
             sonarAnalysed = true
           } catch (err) {
             echo "SonarQube analysis skipped or failed (no server configured?): ${err.message}"
           }
           if (sonarAnalysed) {
             timeout(time: 5, unit: 'MINUTES') {
-              // Fails the build if the Sonar quality gate is red.
               waitForQualityGate abortPipeline: true
             }
           }
@@ -159,7 +133,6 @@ pipeline {
       }
     }
 
-    // ------------------------------------------------------------- 4. SECURITY
     stage('4. Security') {
       steps {
         echo 'Scanning dependencies and the container image for vulnerabilities'
@@ -177,8 +150,6 @@ pipeline {
           npx retire --outputformat text --exitwith 1
         '''
         script {
-          // 4c. Container image scan. Trivy runs from its own image so the agent
-          // needs no extra tooling; HIGH/CRITICAL findings fail the stage.
           def trivy = sh(
             script: '''
               set -e
@@ -197,8 +168,6 @@ pipeline {
           )
           sh 'cat reports/trivy-report.txt || true'
           if (trivy != 0) {
-            // Fixable HIGH/CRITICAL findings are treated as a real defect: the
-            // build is marked unstable and the report is archived for triage.
             unstable("Trivy found fixable HIGH/CRITICAL vulnerabilities — see trivy-report.txt")
           }
         }
@@ -211,7 +180,6 @@ pipeline {
       }
     }
 
-    // --------------------------------------------------------------- 5. DEPLOY
     stage('5. Deploy (staging)') {
       steps {
         echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG} to the staging environment"
@@ -249,7 +217,6 @@ pipeline {
       }
     }
 
-    // -------------------------------------------------------------- 6. RELEASE
     stage('6. Release (production)') {
       steps {
         echo "Promoting the verified image to production as ${RELEASE_TAG}"
@@ -316,7 +283,6 @@ pipeline {
       }
     }
 
-    // ----------------------------------------------------------- 7. MONITORING
     stage('7. Monitoring & Alerting') {
       steps {
         echo 'Starting Prometheus and Alertmanager and verifying live monitoring'
@@ -357,7 +323,6 @@ pipeline {
         echo "--- Running containers ---"
         docker ps --filter "name=taskflow" --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}" || true
       '''
-      // Old images accumulate quickly on a long-lived agent.
       sh 'docker image prune -f --filter "until=168h" || true'
     }
     success {
