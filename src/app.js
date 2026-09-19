@@ -13,10 +13,6 @@ const healthRoutes = require('./routes/healthRoutes');
 const authRoutes = require('./routes/authRoutes');
 const projectRoutes = require('./routes/projectRoutes');
 
-/**
- * Builds the Express application. The app is kept separate from the HTTP
- * server so the integration tests can exercise it in-process with supertest.
- */
 function createApp() {
   const app = express();
 
@@ -26,7 +22,6 @@ function createApp() {
   app.use(compression());
   app.use(express.json({ limit: '100kb' }));
 
-  // A correlation id on every request ties API responses to log lines.
   app.use((req, res, next) => {
     req.id = req.headers['x-request-id'] || randomUUID();
     res.setHeader('X-Request-Id', req.id);
@@ -35,8 +30,6 @@ function createApp() {
 
   app.use(metricsMiddleware);
 
-  // Health and metrics are deliberately mounted before the rate limiter so
-  // that probes and Prometheus scrapes can never be throttled.
   app.use('/', healthRoutes);
 
   app.use(
