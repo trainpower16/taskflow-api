@@ -47,11 +47,6 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
 `;
 
-/**
- * Opens the database connection and applies the schema. Migrations are
- * idempotent (CREATE TABLE IF NOT EXISTS) so a redeploy against an existing
- * volume is safe and requires no manual intervention.
- */
 function connect() {
   if (db) return db;
 
@@ -82,7 +77,6 @@ function close() {
   }
 }
 
-/** Used by the readiness probe — a cheap query that proves the DB is usable. */
 function healthCheck() {
   try {
     getDb().prepare('SELECT 1 AS ok').get();
