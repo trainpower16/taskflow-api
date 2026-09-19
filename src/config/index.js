@@ -1,12 +1,5 @@
 'use strict';
 
-/**
- * Centralised, environment-driven configuration.
- * Every environment (test / staging / production) is configured purely through
- * environment variables so that the same build artefact can be promoted
- * unchanged from the Deploy stage to the Release stage.
- */
-
 const parseIntOr = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? fallback : parsed;
@@ -26,8 +19,6 @@ const config = {
   host: process.env.HOST || '0.0.0.0',
   logLevel: process.env.LOG_LEVEL || (env === 'test' ? 'silent' : 'info'),
   database: {
-    // ':memory:' keeps the integration tests hermetic; a file path is used in
-    // the containerised staging/production environments via a mounted volume.
     file: process.env.DATABASE_FILE || (env === 'test' ? ':memory:' : './data/taskflow.db'),
   },
   auth: {
@@ -42,11 +33,6 @@ const config = {
   shutdownTimeoutMs: parseIntOr(process.env.SHUTDOWN_TIMEOUT_MS, 10000),
 };
 
-/**
- * Fails fast on start-up if a production deployment is missing a real secret.
- * This is deliberately a hard failure: a container that boots with the default
- * development secret would be a critical security defect in production.
- */
 function validateProductionConfig(cfg = config) {
   const errors = [];
   if (cfg.isProduction) {
