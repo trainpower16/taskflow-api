@@ -1,10 +1,5 @@
 'use strict';
 
-/**
- * Seeds a demo administrator, project and tasks. Used to give the deployed
- * environments some data to look at during the demonstration.
- */
-
 const database = require('../src/config/database');
 const authService = require('../src/services/authService');
 const projectService = require('../src/services/projectService');
