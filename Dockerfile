@@ -30,10 +30,29 @@ LABEL org.opencontainers.image.title="taskflow-api" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.source="https://github.com/your-username/taskflow-api"
 
-# Patch the base image's OS packages to the latest available versions. Most
-# fixable HIGH/CRITICAL findings the Security stage reports come from the base
-# layer rather than from application code, and this closes them at build time.
+# Patch the base image's OS packages to the latest available versions, so any
+# vulnerability disclosed against the base layer is closed at build time.
 RUN apk upgrade --no-cache
+
+# Remove the package managers from the runtime image.
+#
+# The container's only job is to run `node src/server.js`; dependencies are
+# installed in the deps stage above and copied in, so npm, npx, corepack and
+# yarn are never invoked here. They were, however, the source of every finding
+# the Trivy scan reported (11 vulnerabilities, 10 HIGH and 1 CRITICAL, all in
+# npm's own bundled dependencies: tar, brace-expansion, sigstore, pacote,
+# picomatch and ip-address) while the application's own dependencies were
+# clean. Deleting them removes those findings and, more importantly, denies an
+# attacker who achieves code execution in the container a ready-made tool for
+# fetching and installing further payloads.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/bin/corepack \
+           /opt/yarn-v* \
+           /usr/local/bin/yarn \
+           /usr/local/bin/yarnpkg
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
