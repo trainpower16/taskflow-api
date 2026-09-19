@@ -1,6 +1,3 @@
-# Production environment plus its monitoring stack, brought up by the Release
-# and Monitoring stages. The application image is the exact artefact that was
-# already verified in staging — it is promoted by tag, never rebuilt.
 services:
   taskflow-prod:
     image: ${IMAGE_NAME:-taskflow-api}:${IMAGE_TAG:-latest}
