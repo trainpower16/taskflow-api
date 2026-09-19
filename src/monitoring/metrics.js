@@ -4,11 +4,6 @@ const client = require('prom-client');
 const { config } = require('../config');
 const taskRepository = require('../repositories/taskRepository');
 
-/**
- * Prometheus instrumentation. The registry carries build metadata as default
- * labels so a spike in errors can be attributed to the exact pipeline run and
- * commit that deployed it.
- */
 const register = new client.Registry();
 register.setDefaultLabels({
   app: config.appName,
@@ -45,8 +40,6 @@ const tasksByStatus = new client.Gauge({
         this.set({ status }, count);
       }
     } catch {
-      // A scrape must never take the application down; the absence of the
-      // metric is itself the signal that the database is unreachable.
     }
   },
 });
@@ -62,18 +55,6 @@ appInfo.set({ version: config.version, build: config.buildNumber, commit: config
 const UUID_SEGMENT = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const NUMERIC_SEGMENT = /\/\d+/g;
 
-/**
- * Normalises a request path into a low-cardinality route label.
- *
- * The label is derived from req.originalUrl rather than req.baseUrl: when a
- * handler calls next(err), Express restores baseUrl as it unwinds to the
- * error middleware, so by the time the response finishes baseUrl is empty and
- * a failed POST /api/auth/login would otherwise be recorded as '/login'.
- *
- * Identifiers are collapsed to ':id', and requests that matched no route are
- * bucketed, so that neither real ids nor a scanner probing random paths can
- * make the number of Prometheus time series grow without bound.
- */
 function routeLabel(req, res) {
   if (res && res.statusCode === 404 && !req.route) return '/unmatched';
 
@@ -82,7 +63,6 @@ function routeLabel(req, res) {
   return normalised.length > 1 ? normalised.replace(/\/$/, '') : normalised;
 }
 
-/** Records one observation per response, using the matched route as the label. */
 function metricsMiddleware(req, res, next) {
   const end = httpRequestDuration.startTimer();
   res.on('finish', () => {
