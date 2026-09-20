@@ -60,9 +60,6 @@ pipeline {
         sh '''
           set -e
           mkdir -p reports coverage
-          # jest exits non-zero if any test fails OR if the coverage thresholds
-          # in package.json (80% lines/statements/functions, 70% branches) are
-          # not met, so this single command is the pass/fail gate for the stage.
           npm run test:ci
         '''
       }
