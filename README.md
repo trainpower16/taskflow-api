@@ -57,7 +57,7 @@ Alert rules in `monitoring/alert.rules.yml`:
 ```bash
 npm ci
 npm test            # 57 tests
-npm start           # http://localhost:3000
+npm start           
 ```
 
 | Command | Purpose |
@@ -72,6 +72,6 @@ npm start           # http://localhost:3000
 All routes below `/api` other than register and login require
 `Authorization: Bearer <token>`.
 
-- `/api/auth` — `register`, `login`, `me`, and an admin-only `users` list
-- `/api/projects` — full CRUD, scoped to the projects you own
-- `/api/projects/:id/tasks` — full CRUD, filterable by `?status=`
+- `/api/auth` : `register`, `login`, `me`, and an admin-only `users` list
+- `/api/projects` : full CRUD, scoped to the projects you own
+- `/api/projects/:id/tasks` : full CRUD, filterable by `?status=`
